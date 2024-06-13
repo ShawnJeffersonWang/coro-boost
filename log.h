@@ -13,6 +13,27 @@
 #include <vector>
 
 #include "mutex.h"
+#include "singleton.h"
+
+#define CORO_LOG_LEVEL(logger, level)                                  \
+    if (logger->getLevel() <= level)                                   \
+    coro::LogEventWrap(                                                \
+        coro::LogEvent::ptr(new coro::LogEvent(                        \
+            logger, level, __FILE__, __LINE__, 0, coro::GetThreadId(), \
+            coro::GetFiberId(), time(0), coro::Thread::GetName())))    \
+        .getSS()
+
+#define CORO_LOG_ERROR(logger) CORO_LOG_LEVEL(logger, coro::LogLevel::ERROR)
+
+/**
+ * @brief 获取name的日志器
+ */
+#define CORO_LOG_NAME(name) coro::LoggerMgr::GetInstance()->getLogger(name)
+
+/**
+ * @brief 获取主日志器
+ */
+#define CORO_LOG_ROOT() coro::LoggerMgr::GetInstance()->getRoot()
 
 namespace coro {
 
@@ -102,7 +123,17 @@ class StdoutLogAppender {};
 
 class FileLogAppender {};
 
-class LoggerManager {};
+/**
+ * @brief 日志器管理类
+ */
+class LoggerManager {
+   public:
+    typedef SpinLock MutexType;
+    LoggerManager();
+};
+
+// 日志器管理类单例模式
+typedef coro::Singleton<LoggerManager> LoggerMgr;
 
 }  // namespace coro
 
