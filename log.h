@@ -23,6 +23,8 @@
             coro::GetFiberId(), time(0), coro::Thread::GetName())))    \
         .getSS()
 
+#define CORO_LOG_DEBUG(logger) CORO_LOG_LEVEL(logger, coro::LogLevel::DEBUG)
+
 #define CORO_LOG_ERROR(logger) CORO_LOG_LEVEL(logger, coro::LogLevel::ERROR)
 
 /**
