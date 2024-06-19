@@ -12,20 +12,29 @@
 // RPS: Requests Per Second（每秒请求数）
 namespace coro {
 
-static Logger::ptr g_logger = CORO_LOG_NAME("system");
-
 // 全局静态变量，用于生成协程id
 static std::atomic<uint64_t> s_fiber_id{0};
 // 全局静态变量，用于统计当前的协程数
 static std::atomic<uint64_t> s_fiber_count{0};
 
 // 线程局部变量，当前线程正在运行的协程
-static thread_local Fiber* t_fiber = nullptr;
+static thread_local Fiber *t_fiber = nullptr;
 // 线程局部变量，当前线程的主协程，切换到这个协程，就相当于切换到了主线程中运行，智能指针形式
 static thread_local Fiber::ptr t_thread_fiber = nullptr;
 
 static ConfigVar<uint32_t>::ptr g_fiber_stack_size = Config::Lookup<uint32_t>(
     "fiber.stack_size", 128 * 1024, "fiber stack size");
+
+/**
+ * @brief malloc栈内存分配器
+ */
+class MallocStackAllocator {
+   public:
+    static void *Alloc(size_t size) { return malloc(size); }
+    static void Dealloc(void *vp, size_t size) { return free(vp); }
+};
+
+using StackAllocator = MallocStackAllocator;
 
 /**
  * @brief 构造函数
@@ -34,15 +43,29 @@ static ConfigVar<uint32_t>::ptr g_fiber_stack_size = Config::Lookup<uint32_t>(
  * 这个协程只能由GetThis()方法调用，所以定义成私有方法
  */
 Fiber::Fiber() {
-    m_state = EXEC;
     SetThis(this);
+    m_state = RUNNING;
 
     // ucp: use context pointer，即用户上下文指针
     if (getcontext(&m_ctx)) {
-        CORO_ASSERT2(false, "getcontext");
     }
     s_fiber_count++;
-    CORO_LOG_DEBUG(g_logger) << "Fiber::Fiber() main id = " << m_id;
+    m_id = s_fiber_id++;
+}
+
+void Fiber::SetThis(Fiber *f) { t_fiber = f; }
+
+/**
+ * 获取当前协程，同时充当初始化当前线程主协程的作用，这个函数在使用协程之前要调用一下
+ */
+Fiber::ptr Fiber::GetThis() {
+    if (t_fiber) {
+        return t_fiber->shared_from_this();
+    }
+
+    Fiber::ptr main_fiber(new Fiber);
+    t_thread_fiber = main_fiber;
+    return t_fiber->shared_from_this();
 }
 
 /**
@@ -57,14 +80,12 @@ Fiber::Fiber(std::function<void()> cb, size_t stacksize, bool use_caller)
     m_stack = StackAllocator::Alloc(m_stacksize);
 
     if (getcontext(&m_ctx)) {
-        CORO_ASSERT2(false, "getcontext");
     }
     m_ctx.uc_link = nullptr;
     m_ctx.uc_stack.ss_sp = m_stack;
     m_ctx.uc_stack.ss_size = m_stacksize;
 
     makecontext(&m_ctx, &Fiber::MainFunc, 0);
-    CORO_LOG_DEBUG(g_logger) << "Fiber::Fiber() id = " << m_id;
 }
 
 /**
@@ -80,30 +101,37 @@ Fiber::ptr GetThis() {
         return t_fiber->shared_from_this();
     }
     Fiber::ptr main_fiber(new Fiber);
-    CORO_ASSERT(t_fiber == main_fiber.get());
     t_thread_fiber = main_fiber;
     return t_fiber->shared_from_this();
 }
 
+// 子协程的resume操作一定是在主协程里执行的
 void Fiber::resume() {
-    CORO_ASSERT(m_state != TERM && m_state != RUNNING);
     SetThis(this);
     m_state = RUNNING;
-
-    if (swapcontext(&(t_thread_fiber->m_ctx), &m_ctx)) {
-        CORO_ASSERT2(false, "swapcontext");
+    if (m_run_in_scheduler) {
+        if (swapcontext(&(t_thread_fiber->m_ctx), &m_ctx)) {
+        }
+    } else {
+        if (swapcontext(&(t_thread_fiber->m_ctx), &m_ctx)) {
+        }
     }
 }
 
+// 主协程的resume操作一定是在子协程里执行的
 void Fiber::yield() {
     //
-    CORO_ASSERT(m_state == RUNNING || m_state == TERM);
     SetThis(t_thread_fiber.get());
     if (m_state != TERM) {
         m_state = READY;
     }
-    if (swapcontext(&m_ctx, &(t_thread_fiber->m_ctx))) {
-        CORO_ASSERT2(false, "swapcontext");
+    if (m_run_in_scheduler) {
+        if (swapcontext(&m_ctx, &(t_thread_fiber->m_ctx))) {
+        }
+    } else {
+        if (swapcontext(&m_ctx, &(t_thread_fiber->m_ctx))) {
+        }
     }
 }
+
 }  // namespace coro
