@@ -2,11 +2,12 @@
  * @file fiber.h
  * @brief 协程封装
  * @author shawn
- * @date 2019-05-24
+ * @date 2024-05-24
  */
 #ifndef __CORO_FIBER_H__
 #define __CORO_FIBER_H__
 
+#include <stdlib.h>
 #include <ucontext.h>
 
 #include <functional>
@@ -28,8 +29,10 @@ class Fiber : public std::enable_shared_from_this<Fiber> {
 
    private:
     /**
-     * @brief 无参构造函数
-     * @attention 每个线程第一个协程的构造
+     * @brief 构造函数
+     * @attention
+     * 无参构造函数只用于创建线程的第一个协程，也就是线程主函数对应的协程，
+     * 这个协程只能由GetThis()方法调用，所以定义成私有方法
      */
     Fiber();
 
